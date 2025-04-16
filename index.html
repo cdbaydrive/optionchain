@@ -1,4 +1,33 @@
-<!DOCTYPE html>
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row =>
+                    row.some(cell => cell !== '' && cell !== null && cell !== undefined)
+                );
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -34,18 +63,44 @@
             flex-wrap: wrap;
         }
 
+        .threshold-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
         .buffer-calc {
             margin-bottom: 20px;
             padding: 10px;
             background-color: #f8f9fa;
             border-radius: 4px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
+            display: block;
         }
 
         .buffer-calc label {
             margin-right: 10px;
+        }
+
+        .file-section {
+            margin-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 20px;
+            display: flex;
+            gap: 20px;
+            flex-wrap: nowrap;
+        }
+
+        .file-section:last-child {
+            border-bottom: none;
+        }
+
+        .file-header {
+            font-size: 1.2em;
+            color: #333;
+            margin-bottom: 10px;
+            font-weight: bold;
         }
 
         input[type="file"],
@@ -70,14 +125,23 @@
 
         .ath-label {
             color: #333;
+            min-width: 100px;
         }
 
-        #athValueInput {
+        #csvFile {
+            width: 350px;
+        }
+
+        .ath-value-input {
             width: 80px;
         }
 
-        #baseBufferInput, #kInput {
-            width: 60px;
+        .base-buffer-input, .k-input {
+            width: 80px;
+        }
+
+        .strike-rel-input, .yield-input {
+            width: 100px;
         }
 
         .calc-display {
@@ -91,22 +155,28 @@
         }
 
         .calc-display td {
-            padding: 5px;
-            border: 1px solid transparent; /* Transparent borders */
+            padding: 8px;
+            border: 1px solid transparent;
             vertical-align: top;
+            min-width: 100px;
+        }
+
+        .calc-display td:first-child {
+            min-width: 120px;
         }
 
         .matching-rows-container {
+            width: 50%;
+            margin-top: 0;
             display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
+            flex-direction: column;
+            align-items: flex-start;
         }
 
         .matching-rows {
             font-size: 0.9em;
             color: #444;
-            width: 48%;
-            min-width: 300px;
+            width: 100%;
         }
 
         .matching-rows table {
@@ -124,6 +194,10 @@
         .matching-rows th {
             background-color: #f8f9fa;
             color: #333;
+        }
+
+        .left-section {
+            width: 50%;
         }
 
         table {
@@ -165,9 +239,7 @@
             flex-wrap: nowrap;
         }
 
-        .day-header 
-   
-{
+        .day-header {
             background-color: #e9ecef;
             padding: 8px;
             border-radius: 4px;
@@ -189,67 +261,60 @@
             outline: 2px solid red;
             outline-offset: -1px;
         }
+
+        .best-option {
+            outline: 2px solid red;
+            outline-offset: -1px;
+        }
+
+        .threshold-match {
+            background-color: #d4edda; /* Light green for threshold matches */
+        }
+
+        .positive {
+            color: green;
+        }
+
+        .negative {
+            color: red;
+        }
+
+        .formula-display {
+            font-size: 0.9em;
+            color: #444;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-top: 10px;
+            max-width: 100%;
+        }
+
+        .formula-display strong {
+            color: #333;
+        }
+
+        .formula-display p {
+            margin: 5px 0;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1 id="pageTitle">CSV Data Viewer</h1>
         <div class="controls">
-            <input type="file" id="csvFile" accept=".csv">
-            <button onclick="processCSV()">Process CSV</button>
-            <input type="number" id="strikeRelInput" placeholder="Strike Rel Threshold (%)" step="0.1">
-            <input type="number" id="yieldInput" placeholder="Yield Threshold (%)" value="2.5" step="0.1">
-            <button onclick="highlightRows()">Highlight</button>
-            <span id="athLabel" class="ath-label">xxx ATH :</span>
-            <input type="number" id="athValueInput" value="Unknown" step="0.01" onchange="updateBufferCalc()">
+            <input type="file" id="csvFile" accept=".csv" multiple>
+            <button id="processButton" onclick="processCSV()">Process CSV</button>
         </div>
-        <div class="buffer-calc">
-            <div>
-                <label>Base Buffer (%):</label>
-                <input type="number" id="baseBufferInput" value="20" step="0.1" onchange="updateBufferCalc()">
-                <label>k:</label>
-                <input type="number" id="kInput" value="1" step="0.1" onchange="updateBufferCalc()">
-                <div id="calcDisplay" class="calc-display">
-                    <table>
-                        <tr><td>Current Price</td><td>N/A</td><td></td></tr>
-                        <tr><td>Price-to-ATH Ratio</td><td>N/A</td><td></td></tr>
-                        <tr><td>Buffer Percentage</td><td>N/A</td><td></td></tr>
-                        <tr><td>Strike</td><td>N/A</td><td></td></tr>
-                    </table>
-                </div>
-            </div>
-            <div class="matching-rows-container">
-                <div id="coveredCalls" class="matching-rows">
-                    <strong>Covered Calls:</strong>
-                    <table>
-                        <thead>
-                            <tr><th>Days</th><th>Stock</th><th>Strike</th><th>Strike Rel</th><th>Premium</th><th>Yield</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr><td colspan="6">No matches yet</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <div id="securedPuts" class="matching-rows">
-                    <strong>Secured Puts:</strong>
-                    <table>
-                        <thead>
-                            <tr><th>Days</th><th>Stock</th><th>Strike</th><th>Strike Rel</th><th>Premium</th><th>Yield</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr><td colspan="6">No matches yet</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+        <div id="bufferCalcContainer" class="buffer-calc">
+            <!-- File sections will be dynamically inserted here -->
         </div>
         <div id="tableContainer"></div>
     </div>
 
     <script>
-        let csvData = [];
-        let currentStockSymbol = '';
-        let currentPrice = null;
+        // Store data for each file
+        let fileData = {};
 
         // Predefined ATH values for specific stocks
         const athValues = {
@@ -257,143 +322,457 @@
             'PLTR': '125.41',
             'TSLA': '497.91',
             'NVDA': '148.87',
-            'MSTR': '440'  // Added ATH for MSTR
+            'MSTR': '440'
         };
 
+        // Test script execution
+        console.log('Script loaded');
+
         function processCSV() {
-            const fileInput = document.getElementById('csvFile');
-            const file = fileInput.files[0];
-            
-            if (!file) {
-                alert('Please select a CSV file first');
-                return;
-            }
+            console.log('processCSV: Function triggered');
+            try {
+                const fileInput = document.getElementById('csvFile');
+                if (!fileInput) {
+                    console.error('processCSV: File input element not found');
+                    alert('Error: File input not found');
+                    return;
+                }
 
-            const filename = file.name;
-            const underscoreIndex = filename.indexOf('_');
-            if (underscoreIndex !== -1) {
-                currentStockSymbol = filename.substring(0, underscoreIndex).toUpperCase();
-            } else {
-                currentStockSymbol = filename.split('.')[0].toUpperCase();
-            }
-            
-            document.getElementById('pageTitle').textContent = `${currentStockSymbol} Option Chains`;
-            updateATHDisplay(currentStockSymbol);
+                const files = fileInput.files;
+                if (!files || files.length === 0) {
+                    console.log('processCSV: No files selected');
+                    alert('Please select at least one CSV file');
+                    return;
+                }
 
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                csvData = parseCSV(text);
-                displayTable(csvData);
-                updateBufferCalc();
-            };
-            reader.readAsText(file);
+                console.log(`processCSV: Processing ${files.length} file(s)`);
+                // Clear previous data
+                fileData = {};
+                const bufferCalcContainer = document.getElementById('bufferCalcContainer');
+                const tableContainer = document.getElementById('tableContainer');
+                if (!bufferCalcContainer || !tableContainer) {
+                    console.error('processCSV: Container elements missing');
+                    alert('Error: Page elements missing');
+                    return;
+                }
+                bufferCalcContainer.innerHTML = '';
+                tableContainer.innerHTML = '';
+
+                // Process each file sequentially
+                let filesProcessed = 0;
+                for (let index = 0; index < files.length; index++) {
+                    const file = files[index];
+                    console.log(`processCSV: Reading file ${file.name}`);
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        console.log(`processCSV: File ${file.name} loaded`);
+                        try {
+                            const text = e.target.result;
+                            const csvData = parseCSV(text);
+                            if (csvData.length === 0) {
+                                console.warn(`processCSV: No valid data in file ${file.name}`);
+                                return;
+                            }
+
+                            const filename = file.name;
+                            const underscoreIndex = filename.indexOf('_');
+                            const stockSymbol = underscoreIndex !== -1 
+                                ? filename.substring(0, underscoreIndex).toUpperCase()
+                                : filename.split('.')[0].toUpperCase();
+
+                            console.log(`processCSV: Parsed stock symbol ${stockSymbol}`);
+                            // Store data for this file
+                            fileData[stockSymbol] = {
+                                csvData,
+                                currentPrice: parseFloat(csvData[0]?.stock) || null
+                            };
+
+                            // Update page title
+                            if (files.length === 1) {
+                                document.getElementById('pageTitle').textContent = `${stockSymbol} Option Chains`;
+                            } else {
+                                document.getElementById('pageTitle').textContent = `Multiple Option Chains`;
+                            }
+                            console.log(`processCSV: Page title updated`);
+
+                            // Create section for this file
+                            console.log(`processCSV: Creating section for ${stockSymbol}`);
+                            createFileSection(stockSymbol, index);
+                            console.log(`processCSV: Updating buffer calc for ${stockSymbol}`);
+                            updateBufferCalc(stockSymbol);
+                            if (files.length === 1) {
+                                console.log(`processCSV: Displaying table for ${stockSymbol}`);
+                                displayTable(csvData);
+                            }
+
+                            filesProcessed++;
+                            if (filesProcessed === files.length) {
+                                console.log('processCSV: All files processed, finding best option');
+                                findBestOption();
+                            }
+                        } catch (error) {
+                            console.error(`processCSV: Error processing file ${file.name}:`, error);
+                            alert(`Error processing file ${file.name}: ${error.message}`);
+                        }
+                    };
+                    reader.onerror = function(e) {
+                        console.error(`processCSV: Error reading file ${file.name}:`, e);
+                        alert(`Error reading file ${file.name}`);
+                    };
+                    reader.readAsText(file);
+                }
+            } catch (error) {
+                console.error('processCSV: Unexpected error:', error);
+                alert('Unexpected error occurred while processing files');
+            }
         }
 
-        function updateATHDisplay(symbol) {
-            const athLabel = document.getElementById('athLabel');
-            const athValueInput = document.getElementById('athValueInput');
-            athLabel.textContent = `${symbol} ATH :`;
+        function createFileSection(stockSymbol, index) {
+            console.log(`createFileSection: Started for ${stockSymbol}`);
+            const bufferCalcContainer = document.getElementById('bufferCalcContainer');
+            if (!bufferCalcContainer) {
+                console.error('createFileSection: bufferCalcContainer not found');
+                return;
+            }
+            const sectionId = `fileSection_${stockSymbol}_${index}`;
             
-            if (athValues.hasOwnProperty(symbol)) {
-                athValueInput.value = athValues[symbol];
+            // Create formula display only for the first file section
+            const formulaHtml = index === 0 ? `
+                <div class="formula-display">
+                    <strong>Best Option Score Formula:</strong>
+                    <p>Score = (1/3 × normDays) + (1/3 × normStrikeRel) + (1/3 × normYield)</p>
+                    <p>normDays = 1 - (days / maxDays)</p>
+                    <p>normStrikeRel = 1 - (|strike_rel| / maxAbsStrikeRel)</p>
+                    <p>normYield = yield / maxYield</p>
+                    <p><em>Best option has the highest score.</em></p>
+                </div>
+            ` : '';
+            
+            // Create section HTML
+            const sectionHtml = `
+                <div class="file-section" id="${sectionId}">
+                    <div class="left-section">
+                        <div class="file-header">${stockSymbol} Analysis</div>
+                        <div>
+                            <label>Base Buffer (%):</label>
+                            <input type="number" class="base-buffer-input" id="baseBufferInput_${stockSymbol}" value="20" step="0.1" onchange="updateBufferCalc('${stockSymbol}')">
+                            <label>k:</label>
+                            <input type="number" class="k-input" id="kInput_${stockSymbol}" value="1" step="0.1" onchange="updateBufferCalc('${stockSymbol}')">
+                            <span id="athLabel_${stockSymbol}" class="ath-label">${stockSymbol} ATH :</span>
+                            <input type="number" class="ath-value-input" id="athValueInput_${stockSymbol}" step="0.01" onchange="updateBufferCalc('${stockSymbol}')">
+                            <div id="calcDisplay_${stockSymbol}" class="calc-display">
+                                <table>
+                                    <tr><td>Current Price</td><td>N/A</td><td></td><td></td></tr>
+                                    <tr><td>Price-to-ATH Ratio</td><td>N/A</td><td></td><td></td></tr>
+                                    <tr><td>Buffer Percentage</td><td>N/A</td><td></td><td></td></tr>
+                                    <tr><td>Strike</td><td>N/A</td><td></td><td></td></tr>
+                                    <tr><td>Minimum Premium</td><td>N/A</td><td>N/A</td><td></td></tr>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="threshold-controls">
+                            <input type="number" class="strike-rel-input" id="strikeRelInput_${stockSymbol}" placeholder="Strike Rel Threshold (%)" step="0.1">
+                            <input type="number" class="yield-input" id="yieldInput_${stockSymbol}" placeholder="Yield Threshold (%)" value="2.5" step="0.1">
+                            <button onclick="highlightRows('${stockSymbol}')">Highlight</button>
+                        </div>
+                    </div>
+                    <div class="matching-rows-container">
+                        <div id="securedPuts_${stockSymbol}" class="matching-rows">
+                            <strong>Secured Puts:</strong>
+                            <table>
+                                <thead>
+                                    <tr><th>Days</th><th>Stock</th><th>Strike</th><th>Strike Rel</th><th>Premium</th><th>Yield</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td colspan="6">No matches yet</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        ${formulaHtml}
+                    </div>
+                </div>
+            `;
+            
+            bufferCalcContainer.insertAdjacentHTML('beforeend', sectionHtml);
+            console.log(`createFileSection: Section created for ${stockSymbol}`);
+
+            // Set ATH value
+            updateATHDisplay(stockSymbol);
+        }
+
+        function updateATHDisplay(stockSymbol) {
+            console.log(`updateATHDisplay: Started for ${stockSymbol}`);
+            const athLabel = document.getElementById(`athLabel_${stockSymbol}`);
+            const athValueInput = document.getElementById(`athValueInput_${stockSymbol}`);
+            if (athLabel && athValueInput) {
+                athLabel.textContent = `${stockSymbol} ATH :`;
+                athValueInput.value = athValues.hasOwnProperty(stockSymbol) ? athValues[stockSymbol] : '';
+                console.log(`updateATHDisplay: ATH set for ${stockSymbol}`);
             } else {
-                athValueInput.value = 'Unknown';
+                console.warn(`updateATHDisplay: ATH elements not found for ${stockSymbol}`);
             }
         }
 
-        function updateBufferCalc() {
-            const athValue = parseFloat(document.getElementById('athValueInput').value);
-            const baseBuffer = parseFloat(document.getElementById('baseBufferInput').value) / 100; // Convert to decimal
-            const k = parseFloat(document.getElementById('kInput').value);
-            const calcDisplay = document.getElementById('calcDisplay');
-            const strikeRelInput = document.getElementById('strikeRelInput');
+        function updateBufferCalc(stockSymbol) {
+            console.log(`updateBufferCalc: Started for ${stockSymbol}`);
+            const athValueInput = document.getElementById(`athValueInput_${stockSymbol}`);
+            const baseBufferInput = document.getElementById(`baseBufferInput_${stockSymbol}`);
+            const kInput = document.getElementById(`kInput_${stockSymbol}`);
+            const calcDisplay = document.getElementById(`calcDisplay_${stockSymbol}`);
+            const strikeRelInput = document.getElementById(`strikeRelInput_${stockSymbol}`);
+            const yieldInput = document.getElementById(`yieldInput_${stockSymbol}`);
 
-            if (!csvData.length || isNaN(athValue) || isNaN(baseBuffer) || isNaN(k)) {
-                calcDisplay.innerHTML = `
-                    <table>
-                        <tr><td>Current Price</td><td>N/A</td><td></td></tr>
-                        <tr><td>Price-to-ATH Ratio</td><td>N/A</td><td></td></tr>
-                        <tr><td>Buffer Percentage</td><td>N/A</td><td></td></tr>
-                        <tr><td>Strike</td><td>N/A</td><td></td></tr>
-                    </table>
-                `;
-                strikeRelInput.value = ''; // Clear Strike Rel Threshold
+            if (!athValueInput || !baseBufferInput || !kInput || !calcDisplay || !yieldInput) {
+                console.warn(`updateBufferCalc: Required elements missing for ${stockSymbol}`);
                 return;
             }
 
-            // Get current price from the first row of CSV data (assuming "stock" column)
-            currentPrice = parseFloat(csvData[0].stock);
-            if (isNaN(currentPrice)) {
+            const athValue = parseFloat(athValueInput.value);
+            const baseBuffer = parseFloat(baseBufferInput.value) / 100;
+            const k = parseFloat(kInput.value);
+            const yieldThreshold = parseFloat(yieldInput.value) || 0;
+            const data = fileData[stockSymbol]?.csvData || [];
+            const currentPrice = fileData[stockSymbol]?.currentPrice;
+
+            if (!data.length || isNaN(athValue) || isNaN(baseBuffer) || isNaN(k) || isNaN(currentPrice)) {
                 calcDisplay.innerHTML = `
                     <table>
-                        <tr><td>Current Price</td><td>N/A (Missing stock price in CSV)</td><td></td></tr>
-                        <tr><td>Price-to-ATH Ratio</td><td>N/A</td><td></td></tr>
-                        <tr><td>Buffer Percentage</td><td>N/A</td><td></td></tr>
-                        <tr><td>Strike</td><td>N/A</td><td></td></tr>
+                        <tr><td>Current Price</td><td>N/A</td><td></td><td></td></tr>
+                        <tr><td>Price-to-ATH Ratio</td><td>N/A</td><td></td><td></td></tr>
+                        <tr><td>Buffer Percentage</td><td>N/A</td><td></td><td></td></tr>
+                        <tr><td>Strike</td><td>N/A</td><td></td><td></td></tr>
+                        <tr><td>Minimum Premium</td><td>N/A</td><td>N/A</td><td></td></tr>
                     </table>
                 `;
-                strikeRelInput.value = ''; // Clear Strike Rel Threshold
+                if (strikeRelInput) {
+                    strikeRelInput.value = '';
+                }
+                console.log(`updateBufferCalc: Invalid data for ${stockSymbol}, set to N/A`);
                 return;
             }
 
-            // Calculate buffer and strike
             const priceToATHRatio = currentPrice / athValue;
             const bufferPercentage = baseBuffer * Math.pow(priceToATHRatio, k);
             const strike = currentPrice * (1 - bufferPercentage);
 
-            // Pre-fill Strike Rel Threshold with Buffer Percentage
-            strikeRelInput.value = (bufferPercentage * 100).toFixed(2);
+            // Find the closest strike from CSV data that is lower than the calculated strike
+            let closestStrike = null;
+            let minDifference = Infinity;
+            data.forEach(row => {
+                if (row.strike) {
+                    const csvStrike = parseFloat(row.strike);
+                    if (csvStrike <= strike) {
+                        const difference = strike - csvStrike;
+                        if (difference < minDifference) {
+                            minDifference = difference;
+                            closestStrike = csvStrike;
+                        }
+                    }
+                }
+            });
 
-            // Update display with calculated values in a 4x3 table, bolding Buffer Percentage and Strike
+            // Calculate the value for cell (3x5): closestStrike * (yieldThreshold / 100)
+            const minimumPremiumValue = closestStrike !== null && yieldThreshold !== 0
+                ? (closestStrike * (yieldThreshold / 100)).toFixed(2)
+                : 'N/A';
+
+            const performancePercentage = ((currentPrice - athValue) / athValue) * 100;
+            const performanceColorClass = performancePercentage >= 0 ? 'positive' : 'negative';
+            const performanceDisplay = `(${performancePercentage.toFixed(2)}%)`;
+
+            const strikeToATHPercentage = ((strike / athValue) - 1) * 100;
+            const strikeToATHColorClass = strikeToATHPercentage >= 0 ? 'positive' : 'negative';
+            const strikeToATHDisplay = `(${strikeToATHPercentage.toFixed(2)}%)`;
+
+            // Pre-fill Strike Rel Threshold for all files
+            if (strikeRelInput) {
+                strikeRelInput.value = (bufferPercentage * 100).toFixed(2);
+            }
+
             calcDisplay.innerHTML = `
                 <table>
-                    <tr><td>Current Price</td><td>$${currentPrice.toFixed(2)}</td><td></td></tr>
-                    <tr><td>Price-to-ATH Ratio</td><td>${priceToATHRatio.toFixed(2)}</td><td>$${currentPrice.toFixed(2)} / $${athValue.toFixed(2)}</td></tr>
-                    <tr><td>Buffer Percentage</td><td><strong>${(bufferPercentage * 100).toFixed(2)}%</strong></td><td>${(baseBuffer * 100).toFixed(2)}% × ${priceToATHRatio.toFixed(2)}^${k}</td></tr>
-                    <tr><td>Strike</td><td><strong>$${strike.toFixed(2)}</strong></td><td>$${currentPrice.toFixed(2)} × (1 - ${bufferPercentage.toFixed(2)})</td></tr>
+                    <tr><td>Current Price</td><td>$${currentPrice.toFixed(2)}</td><td></td><td><span class="${performanceColorClass}">${performanceDisplay}</span></td></tr>
+                    <tr><td>Price-to-ATH Ratio</td><td>${priceToATHRatio.toFixed(2)}</td><td>$${currentPrice.toFixed(2)} / $${athValue.toFixed(2)}</td><td></td></tr>
+                    <tr><td>Buffer Percentage</td><td><strong>${(bufferPercentage * 100).toFixed(2)}%</strong></td><td>${(baseBuffer * 100).toFixed(2)}% × ${priceToATHRatio.toFixed(2)}^${k}</td><td></td></tr>
+                    <tr><td>Strike</td><td><strong>$${strike.toFixed(2)}</strong></td><td>$${currentPrice.toFixed(2)} × (1 - ${bufferPercentage.toFixed(2)})</td><td><span class="${strikeToATHColorClass}">${strikeToATHDisplay}</span></td></tr>
+                    <tr><td>Minimum Premium</td><td><strong>${closestStrike !== null ? closestStrike.toFixed(2) : 'N/A'}</strong></td><td><strong>$${minimumPremiumValue}</strong></td><td></td></tr>
                 </table>
             `;
+            console.log(`updateBufferCalc: Updated for ${stockSymbol}`);
+        }
+
+        function findBestOption() {
+            console.log('findBestOption: Started');
+            try {
+                // Collect all Secured Puts across all files
+                let allOptions = [];
+                Object.keys(fileData).forEach(stockSymbol => {
+                    const data = fileData[stockSymbol].csvData;
+                    const strikeRelThreshold = parseFloat(document.getElementById(`strikeRelInput_${stockSymbol}`)?.value) || 0;
+                    const yieldThreshold = parseFloat(document.getElementById(`yieldInput_${stockSymbol}`)?.value) || 0;
+
+                    data.forEach(row => {
+                        if (row.type === 'P' && row.strike_rel && row.yield && 
+                            parseFloat(row.strike_rel) <= -strikeRelThreshold && 
+                            parseFloat(row.yield) >= yieldThreshold &&
+                            parseFloat(row.strike_rel) < 0 && 
+                            parseFloat(row.yield) > 0) {
+                            allOptions.push({
+                                stockSymbol,
+                                days: parseFloat(row.days),
+                                strike_rel: parseFloat(row.strike_rel),
+                                yield: parseFloat(row.yield),
+                                stock: parseFloat(row.stock),
+                                strike: parseFloat(row.strike),
+                                premium: parseFloat(row.premium)
+                            });
+                        }
+                    });
+                });
+
+                if (allOptions.length === 0) {
+                    console.log('findBestOption: No valid options found');
+                    return;
+                }
+
+                // Normalize values
+                const maxDays = Math.max(...allOptions.map(opt => opt.days));
+                const maxAbsStrikeRel = Math.max(...allOptions.map(opt => Math.abs(opt.strike_rel)));
+                const maxYield = Math.max(...allOptions.map(opt => opt.yield));
+
+                // Avoid division by zero
+                const safeMaxDays = maxDays > 0 ? maxDays : 1;
+                const safeMaxAbsStrikeRel = maxAbsStrikeRel > 0 ? maxAbsStrikeRel : 1;
+                const safeMaxYield = maxYield > 0 ? maxYield : 1;
+
+                // Calculate scores
+                const weights = { days: 1/3, strike_rel: 1/3, yield: 1/3 };
+                allOptions.forEach(opt => {
+                    const normDays = maxDays > 0 ? (1 - opt.days / safeMaxDays) : 0;
+                    const normStrikeRel = maxAbsStrikeRel > 0 ? (1 - Math.abs(opt.strike_rel) / safeMaxAbsStrikeRel) : 0;
+                    const normYield = maxYield > 0 ? (opt.yield / safeMaxYield) : 0;
+                    opt.score = (weights.days * normDays) + (weights.strike_rel * normStrikeRel) + (weights.yield * normYield);
+                });
+
+                // Find best option
+                const bestOption = allOptions.reduce((best, current) => 
+                    current.score > (best?.score || -Infinity) ? current : best, null);
+
+                if (!bestOption) {
+                    console.log('findBestOption: No best option identified');
+                    return;
+                }
+
+                console.log(`findBestOption: Best option found for ${bestOption.stockSymbol}`);
+
+                // Highlight best option in Secured Puts table
+                Object.keys(fileData).forEach(stockSymbol => {
+                    const securedPutsDisplay = document.getElementById(`securedPuts_${stockSymbol}`);
+                    if (!securedPutsDisplay) return;
+
+                    const strikeRelThreshold = parseFloat(document.getElementById(`strikeRelInput_${stockSymbol}`)?.value) || 0;
+                    const yieldThreshold = parseFloat(document.getElementById(`yieldInput_${stockSymbol}`)?.value) || 0;
+                    const data = fileData[stockSymbol].csvData;
+
+                    let securedPutsHtml = '<strong>Secured Puts:</strong><table><thead><tr><th>Days</th><th>Stock</th><th>Strike</th><th>Strike Rel</th><th>Premium</th><th>Yield</th></tr></thead><tbody>';
+                    let securedPuts = [];
+
+                    data.forEach(row => {
+                        if (row.type === 'P' && row.strike_rel && row.yield && 
+                            parseFloat(row.strike_rel) <= -strikeRelThreshold && 
+                            parseFloat(row.yield) >= yieldThreshold) {
+                            securedPuts.push({
+                                days: row.days,
+                                stock: row.stock,
+                                strike: row.strike,
+                                strike_rel: row.strike_rel,
+                                premium: row.premium,
+                                yield: row.yield
+                            });
+                        }
+                    });
+
+                    if (securedPuts.length === 0) {
+                        securedPutsHtml += '<tr><td colspan="6">No matches found</td></tr>';
+                    } else {
+                        securedPuts.forEach(row => {
+                            const isBest = stockSymbol === bestOption.stockSymbol &&
+                                parseFloat(row.days) === bestOption.days &&
+                                parseFloat(row.strike_rel) === bestOption.strike_rel &&
+                                parseFloat(row.yield) === bestOption.yield;
+                            securedPutsHtml += `
+                                <tr${isBest ? ' class="best-option"' : ''}>
+                                    <td>${row.days}</td>
+                                    <td>${parseFloat(row.stock).toFixed(2)}</td>
+                                    <td>${row.strike}</td>
+                                    <td>${row.strike_rel}</td>
+                                    <td>${row.premium}</td>
+                                    <td>${row.yield}</td>
+                                </tr>
+                            `;
+                        });
+                    }
+                    securedPutsHtml += '</tbody></table>';
+                    securedPutsDisplay.innerHTML = securedPutsHtml;
+                });
+
+                console.log('findBestOption: Best option highlighted');
+            } catch (error) {
+                console.error('findBestOption: Error:', error);
+            }
         }
 
         function parseCSV(text) {
-            const lines = text.split('\n').filter(line => line.trim() !== '');
-            if (lines.length < 1) return [];
-
-            const allHeaders = parseCSVLine(lines[0]);
-            const headerIndices = {};
-            allHeaders.forEach((header, index) => {
-                headerIndices[header] = index;
-            });
-
-            const validHeaders = allHeaders.filter(header => 
-                header.trim() !== '' && 
-                header.toLowerCase() !== 'multiplier' && 
-                header.toLowerCase() !== 'type'
-            );
-
-            if (!validHeaders.includes('days')) {
-                alert('CSV file must contain a "days" column');
-                return;
-            }
-
-            const result = [];
-            for (let i = 1; i < lines.length; i++) {
-                const values = parseCSVLine(lines[i]);
-                if (values.length >= validHeaders.length) {
-                    const obj = {};
-                    validHeaders.forEach((header) => {
-                        const index = headerIndices[header];
-                        obj[header] = values[index] || '';
-                    });
-                    obj.type = values[headerIndices['type']] || '';
-                    result.push(obj);
+            console.log('parseCSV: Started');
+            try {
+                const lines = text.split('\n').filter(line => line.trim() !== '');
+                if (lines.length < 1) {
+                    console.warn('parseCSV: No valid lines in CSV');
+                    return [];
                 }
+
+                const allHeaders = parseCSVLine(lines[0]);
+                console.log('parseCSV: Headers:', allHeaders);
+                const headerIndices = {};
+                allHeaders.forEach((header, index) => {
+                    headerIndices[header] = index;
+                });
+
+                const validHeaders = allHeaders.filter(header => 
+                    header.trim() !== '' && 
+                    header.toLowerCase() !== 'multiplier' && 
+                    header.toLowerCase() !== 'type'
+                );
+
+                if (!validHeaders.includes('days')) {
+                    console.warn('parseCSV: Missing "days" column');
+                    alert('CSV file must contain a "days" column');
+                    return [];
+                }
+
+                const result = [];
+                for (let i = 1; i < lines.length; i++) {
+                    const values = parseCSVLine(lines[i]);
+                    if (values.length >= validHeaders.length) {
+                        const obj = {};
+                        validHeaders.forEach((header) => {
+                            const index = headerIndices[header];
+                            obj[header] = values[index] || '';
+                        });
+                        obj.type = values[headerIndices['type']] || '';
+                        result.push(obj);
+                    }
+                }
+                console.log(`parseCSV: Parsed ${result.length} rows`);
+                return result.sort((a, b) => parseFloat(a.days) - parseFloat(b.days));
+            } catch (error) {
+                console.error('parseCSV: Error:', error);
+                return [];
             }
-            return result.sort((a, b) => parseFloat(a.days) - parseFloat(b.days));
         }
 
         function parseCSVLine(line) {
+            console.log('parseCSVLine: Processing line');
             const result = [];
             let current = '';
             let inQuotes = false;
@@ -412,8 +791,10 @@
             return result.map(value => value.replace(/^"|"$/g, '').trim());
         }
 
-        function displayTable(data) {
-            if (data.length === 0) {
+        function displayTable(data, stockSymbol, strikeRelThreshold = null, yieldThreshold = null) {
+            console.log('displayTable: Started');
+            if (!data || data.length === 0) {
+                console.warn('displayTable: No data to display');
                 document.getElementById('tableContainer').innerHTML = 
                     '<p class="no-data">No data to display</p>';
                 return;
@@ -476,6 +857,13 @@
                         const shouldHighlight = row.strike && row.stock && 
                             parseFloat(row.strike) > parseFloat(row.stock);
                         let classNames = shouldHighlight ? ['highlight-row'] : [];
+                        if (strikeRelThreshold !== null && yieldThreshold !== null && row.strike_rel && row.yield) {
+                            const matchesThreshold = parseFloat(row.strike_rel) <= -strikeRelThreshold && 
+                                                    parseFloat(row.yield) >= yieldThreshold;
+                            if (matchesThreshold) {
+                                classNames.push('threshold-match');
+                            }
+                        }
                         html += `<tr${classNames.length ? ' class="' + classNames.join(' ') + '"' : ''}>`;
                         headers.forEach(header => {
                             let displayValue = row[header] || '';
@@ -494,153 +882,55 @@
             });
 
             document.getElementById('tableContainer').innerHTML = html;
+            console.log('displayTable: Table rendered');
         }
 
-        function highlightRows() {
-            const strikeRelThreshold = parseFloat(document.getElementById('strikeRelInput').value);
-            const yieldThreshold = parseFloat(document.getElementById('yieldInput').value);
-            const coveredCallsDisplay = document.getElementById('coveredCalls');
-            const securedPutsDisplay = document.getElementById('securedPuts');
+        function highlightRows(stockSymbol) {
+            console.log(`highlightRows: Started for ${stockSymbol}`);
+            const strikeRelInput = document.getElementById(`strikeRelInput_${stockSymbol}`);
+            const yieldInput = document.getElementById(`yieldInput_${stockSymbol}`);
+            const strikeRelThreshold = parseFloat(strikeRelInput?.value);
+            const yieldThreshold = parseFloat(yieldInput?.value);
 
             if (isNaN(strikeRelThreshold) || isNaN(yieldThreshold)) {
+                console.warn('highlightRows: Invalid threshold values');
                 alert('Please enter valid numbers for Strike Rel and Yield thresholds');
                 return;
             }
 
-            if (csvData.length === 0) {
-                alert('Please process a CSV file first');
+            if (!fileData[stockSymbol]) {
+                console.warn(`highlightRows: No data for ${stockSymbol}`);
+                alert('No data available for this stock');
                 return;
             }
 
-            const headers = Object.keys(csvData[0]).filter(header => header !== 'type');
-            let html = '';
-            let coveredCallsHtml = '<strong>Covered Calls:</strong><table><thead><tr><th>Days</th><th>Stock</th><th>Strike</th><th>Strike Rel</th><th>Premium</th><th>Yield</th></tr></thead><tbody>';
+            const data = fileData[stockSymbol].csvData;
+            const securedPutsDisplay = document.getElementById(`securedPuts_${stockSymbol}`);
+            
+            if (!securedPutsDisplay) {
+                console.warn(`highlightRows: Secured puts display not found for ${stockSymbol}`);
+                return;
+            }
+
+            const headers = Object.keys(data[0]).filter(header => header !== 'type');
             let securedPutsHtml = '<strong>Secured Puts:</strong><table><thead><tr><th>Days</th><th>Stock</th><th>Strike</th><th>Strike Rel</th><th>Premium</th><th>Yield</th></tr></thead><tbody>';
-            let coveredCalls = [];
             let securedPuts = [];
 
-            const daysGroups = {};
-            csvData.forEach(row => {
-                if (!daysGroups[row.days]) {
-                    daysGroups[row.days] = { C: [], P: [] };
-                }
-                if (row.type === 'C') {
-                    daysGroups[row.days].C.push(row);
-                } else if (row.type === 'P') {
-                    daysGroups[row.days].P.push(row);
+            data.forEach(row => {
+                if (row.type === 'P' && row.strike_rel && row.yield && 
+                    parseFloat(row.strike_rel) <= -strikeRelThreshold && 
+                    parseFloat(row.yield) >= yieldThreshold) {
+                    securedPuts.push({
+                        days: row.days,
+                        stock: row.stock,
+                        strike: row.strike,
+                        strike_rel: row.strike_rel,
+                        premium: row.premium,
+                        yield: row.yield
+                    });
                 }
             });
 
-            Object.keys(daysGroups).forEach(day => {
-                const group = daysGroups[day];
-                html += '<div class="day-section">';
-
-                if (group.C.length > 0) {
-                    html += `<div class="table-wrapper">`;
-                    html += `<div class="day-header">${day} Day(s) - Covered Calls</div>`;
-                    html += '<table><thead><tr>';
-                    headers.forEach(header => {
-                        html += `<th>${header}</th>`;
-                    });
-                    html += '</tr></thead><tbody>';
-                    group.C.forEach(row => {
-                        const shouldHighlight = row.strike && row.stock && 
-                            parseFloat(row.strike) < parseFloat(row.stock);
-                        const highYieldStrike = row.strike_rel && row.yield && 
-                            parseFloat(row.strike_rel) >= strikeRelThreshold && 
-                            parseFloat(row.yield) >= yieldThreshold;
-                        let classNames = [];
-                        if (shouldHighlight) classNames.push('highlight-row');
-                        if (highYieldStrike) {
-                            classNames.push('high-yield-strike');
-                            coveredCalls.push({
-                                days: row.days,
-                                stock: row.stock,
-                                strike: row.strike,
-                                strike_rel: row.strike_rel,
-                                premium: row.premium,
-                                yield: row.yield
-                            });
-                        }
-                        html += `<tr${classNames.length ? ' class="' + classNames.join(' ') + '"' : ''}>`;
-                        headers.forEach(header => {
-                            let displayValue = row[header] || '';
-                            if (header.toLowerCase() === 'stock' && displayValue !== '') {
-                                const parsedValue = parseFloat(displayValue);
-                                displayValue = isNaN(parsedValue) ? displayValue : parsedValue.toFixed(2);
-                            }
-                            html += `<td>${displayValue}</td>`;
-                        });
-                        html += '</tr>';
-                    });
-                    html += '</tbody></table></div>';
-                }
-
-                if (group.P.length > 0) {
-                    html += `<div class="table-wrapper">`;
-                    html += `<div class="day-header">${day} Day(s) - Secured Puts</div>`;
-                    html += '<table><thead><tr>';
-                    headers.forEach(header => {
-                        html += `<th>${header}</th>`;
-                    });
-                    html += '</tr></thead><tbody>';
-                    group.P.forEach(row => {
-                        const shouldHighlight = row.strike && row.stock && 
-                            parseFloat(row.strike) > parseFloat(row.stock);
-                        const highYieldStrike = row.strike_rel && row.yield && 
-                            parseFloat(row.strike_rel) <= -strikeRelThreshold && 
-                            parseFloat(row.yield) >= yieldThreshold;
-                        let classNames = [];
-                        if (shouldHighlight) classNames.push('highlight-row');
-                        if (highYieldStrike) {
-                            classNames.push('high-yield-strike');
-                            securedPuts.push({
-                                days: row.days,
-                                stock: row.stock,
-                                strike: row.strike,
-                                strike_rel: row.strike_rel,
-                                premium: row.premium,
-                                yield: row.yield
-                            });
-                        }
-                        html += `<tr${classNames.length ? ' class="' + classNames.join(' ') + '"' : ''}>`;
-                        headers.forEach(header => {
-                            let displayValue = row[header] || '';
-                            if (header.toLowerCase() === 'stock' && displayValue !== '') {
-                                const parsedValue = parseFloat(displayValue);
-                                displayValue = isNaN(parsedValue) ? displayValue : parsedValue.toFixed(2);
-                            }
-                            html += `<td>${displayValue}</td>`;
-                        });
-                        html += '</tr>';
-                    });
-                    html += '</tbody></table></div>';
-                }
-
-                html += '</div>';
-            });
-
-            // Update Covered Calls table
-            if (coveredCalls.length === 0) {
-                coveredCallsHtml += '<tr><td colspan="6">No matches found</td></tr>';
-            } else {
-                coveredCalls.forEach(row => {
-                    coveredCallsHtml += `
-                        <tr>
-                            <td>${row.days}</td>
-                            <td>${parseFloat(row.stock).toFixed(2)}</td>
-                            <td>${row.strike}</td>
-                            <td>${row.strike_rel}</td>
-                            <td>${row.premium}</td>
-                            <td>${row.yield}</td>
-                        </tr>
-                    `;
-                });
-            }
-            coveredCallsHtml += '</tbody></table>';
-            coveredCallsDisplay.innerHTML = coveredCallsHtml;
-
-            // Update Secured Puts table
             if (securedPuts.length === 0) {
                 securedPutsHtml += '<tr><td colspan="6">No matches found</td></tr>';
             } else {
@@ -659,8 +949,16 @@
             }
             securedPutsHtml += '</tbody></table>';
             securedPutsDisplay.innerHTML = securedPutsHtml;
+            console.log(`highlightRows: Secured puts updated for ${stockSymbol}`);
 
-            document.getElementById('tableContainer').innerHTML = html;
+            // Update main tables for single file, with threshold highlighting
+            if (Object.keys(fileData).length === 1) {
+                console.log(`highlightRows: Updating main table for ${stockSymbol} with thresholds`);
+                displayTable(data, stockSymbol, strikeRelThreshold, yieldThreshold);
+            }
+
+            // Re-run best option calculation after updating thresholds
+            findBestOption();
         }
     </script>
 </body>
